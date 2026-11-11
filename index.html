@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fikir Bahçesi 🌱</title>
+<style>
+:root{--bg:#f3f7ee;--card:#fff;--ink:#1f2d1f;--muted:#6b7c6b;--green:#3f8f4f;--line:#dfe8d6;--danger:#c0392b}
+@media (prefers-color-scheme:dark){:root{--bg:#121a12;--card:#1c271c;--ink:#e8f0e4;--muted:#9bb09b;--green:#5cb86e;--line:#2c3b2c;--danger:#e57368}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+main{max-width:860px;margin:0 auto;padding:32px 16px}
+h1{margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 24px}
+form{display:grid;gap:8px}
+.add{background:var(--card);padding:16px;border:1px solid var(--line);border-radius:14px;margin-bottom:20px}
+input,textarea{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:8px 12px;background:var(--green);color:#fff}
+button:disabled{opacity:.4;cursor:default}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button.danger{background:transparent;color:var(--danger);border:1px solid var(--line)}
+.stats{display:flex;gap:16px;margin-bottom:16px;color:var(--muted);flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.emoji{font-size:40px}
+.bar{height:6px;background:var(--line);border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--green);transition:width .3s}
+.actions{display:flex;gap:6px;margin-top:auto}
+.actions button:first-child{flex:1}
+.empty{color:var(--muted);text-align:center;padding:32px;grid-column:1/-1}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);width:min(420px,92vw)}
+</style>
+</head>
+<body>
+<main>
+  <h1>🌱 Fikir Bahçesi</h1>
+  <p class="sub">Fikirlerini tohum olarak ek, sula ve çiçek açmasını izle.</p>
+
+  <form class="add" id="addForm">
+    <input name="title" placeholder="Yeni fikir başlığı" required maxlength="80">
+    <textarea name="note" rows="2" placeholder="Kısa not (isteğe bağlı)" maxlength="300"></textarea>
+    <button>🌰 Tohumu ek</button>
+  </form>
+
+  <div class="stats" id="stats"></div>
+  <div class="grid" id="grid"></div>
+</main>
+
+<dialog id="dlg">
+  <form id="editForm">
+    <h3 style="margin:0">✏️ Fikri düzenle</h3>
+    <input type="hidden" id="editId">
+    <input id="editTitle" required maxlength="80">
+    <textarea id="editNote" rows="3" maxlength="300"></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button type="button" class="ghost" id="cancelEdit">Vazgeç</button>
+      <button>Kaydet</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const STAGES = { tohum:{e:'🌰',l:'Tohum'}, filiz:{e:'🌱',l:'Filiz'}, cicek:{e:'🌸',l:'Çiçek'} };
+const MAX = 6;
+let ideas = [];
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(url, method = 'GET', body) {
+  const r = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Bir hata oluştu');
+  return r.status === 204 ? null : r.json();
+}
+
+async function load() { ideas = await api('/api/ideas'); render(); }
+
+function card(i) {
+  const s = STAGES[i.stage];
+  return `<article class="card" data-id="${i._id}">
+    <div class="emoji">${s.e}</div>
+    <strong>${esc(i.title)}</strong>
+    <small style="color:var(--muted)">${s.l} · 💧 ${i.waterCount}/${MAX}</small>
+    ${i.note ? `<p style="margin:0">${esc(i.note)}</p>` : ''}
+    <div class="bar"><i style="width:${Math.round((i.waterCount / MAX) * 100)}%"></i></div>
+    <div class="actions">
+      <button data-act="water" ${i.waterCount >= MAX ? 'disabled' : ''}>💧 Sula</button>
+      <button class="ghost" data-act="edit" title="Düzenle">✏️</button>
+      <button class="danger" data-act="del" title="Sil">🗑️</button>
+    </div>
+  </article>`;
+}
+
+function render() {
+  $('#stats').innerHTML = Object.entries(STAGES)
+    .map(([k, v]) => `<span>${v.e} ${v.l}: ${ideas.filter((i) => i.stage === k).length}</span>`)
+    .join('');
+  $('#grid').innerHTML = ideas.length
+    ? ideas.map(card).join('')
+    : '<p class="empty">Bahçe henüz boş. İlk tohumunu ek 🌰</p>';
+}
+
+$('#addForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try {
+    await api('/api/ideas', 'POST', { title: f.get('title'), note: f.get('note') });
+    e.target.reset();
+    await load();
+  } catch (err) { alert(err.message); }
+});
+
+$('#grid').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const id = btn.closest('.card').dataset.id;
+  try {
+    if (btn.dataset.act === 'edit') {
+      const i = ideas.find((x) => x._id === id);
+      $('#editId').value = id;
+      $('#editTitle').value = i.title;
+      $('#editNote').value = i.note || '';
+      return $('#dlg').showModal();
+    }
+    if (btn.dataset.act === 'water') await api(`/api/ideas/${id}/water`, 'PATCH');
+    if (btn.dataset.act === 'del') {
+      if (!confirm('Bu fikri bahçeden sökelim mi?')) return;
+      await api(`/api/ideas/${id}`, 'DELETE');
+    }
+    await load();
+  } catch (err) { alert(err.message); }
+});
+
+$('#editForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await api(`/api/ideas/${$('#editId').value}`, 'PUT', { title: $('#editTitle').value, note: $('#editNote').value });
+    $('#dlg').close();
+    await load();
+  } catch (err) { alert(err.message); }
+});
+$('#cancelEdit').addEventListener('click', () => $('#dlg').close());
+
+load().catch((err) => alert(err.message));
+</script>
+</body>
+</html>
